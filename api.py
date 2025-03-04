@@ -55,9 +55,9 @@ def token_required(func):
 def after_request_handler(response):
     try:
         if ENABLE_API_DEBUG:
-            print(f'url: {request.url}\nrequest: {request.get_data()}\nresponse: {response.get_data()}')
+            print(f'\nurl: {request.url}\nrequest: {request.get_data()}\nresponse: {response.get_data()}', flush=True)
     except Exception as ec:
-        print(f'error: {str(ec)}')
+        print(f'\nerror: {str(ec)}', flush=True)
     finally:
         return response
 
