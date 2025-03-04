@@ -74,7 +74,7 @@ def internal_server_error(error):
 # 自定义500
 @app.errorhandler(500)
 def internal_server_error(error):
-    print(f'\nerror: {str(ec)}', flush=True)
+    print(f'\nerror: {str(error)}', flush=True)
     return {'error': '服务请求错误, 稍后重试'}, 500
 
 # 添加账户，客户端已传递明文密码，直接存储即可
