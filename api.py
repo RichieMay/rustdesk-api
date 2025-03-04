@@ -12,7 +12,7 @@ api = Blueprint('/api', __name__, url_prefix='/api')
 admin_api = Blueprint('/admin/api', __name__, url_prefix='/admin/api')
 
 HTTP_DECODE_TOEKN = 'HTTP_DECODE_TOEKN'
-TOKEN_LIFETIME_MS = 48 * 3600 * 1000 # 令牌存活小时
+TOKEN_LIFETIME_MS = 48 * 3600 * 1000 # 令牌存活毫秒
 ENABLE_API_DEBUG = os.environ.get('ENABLE_API_DEBUG', False)
 
 class Utils:
