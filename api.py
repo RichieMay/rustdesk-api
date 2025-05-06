@@ -314,7 +314,7 @@ def get_device_group_user():
 def get_device_group_peer():
     return {'total': 0, 'data': [], 'updated_at': int(datetime.now().timestamp() * 1000)}
 
-# 在反代后以单线程运行
+# 在反代后以单线程运行, 只应该反代api接口
 app.register_blueprint(api)
 app.register_blueprint(admin_api)
 app.run(host='0.0.0.0', port=80, threaded=False)
