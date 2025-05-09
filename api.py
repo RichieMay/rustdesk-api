@@ -6,7 +6,7 @@ import functools
 import dataclasses
 from datetime import datetime
 from urllib.parse import urlparse
-from flask import abort, json, request, Blueprint, Flask
+from flask import abort, json, jsonify, request, Blueprint, Flask
 from database_manager import db_manager, LoginType, AccountEntity, DeviceEntity, TokenEntity, TagEntity, AddressBookEntity
 
 app = Flask(__name__)
@@ -190,7 +190,7 @@ def login_options():
     if not WEBAUTH_HOST:
         abort(404)
 
-    return ["common-oidc/[{\"name\":\"webauth\"}]", "oidc/webauth"]
+    return jsonify(["common-oidc/[{\"name\":\"webauth\"}]", "oidc/webauth"])
 
 # webauth登录请求
 @api.route('/oidc/auth', methods=['POST'])
