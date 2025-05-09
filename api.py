@@ -16,7 +16,7 @@ admin_api = Blueprint('/admin/api', __name__, url_prefix='/admin/api')
 HTTP_DECODE_TOEKN = 'HTTP_DECODE_TOEKN'
 TOKEN_LIFETIME_MS = 48 * 3600 * 1000 # 令牌存活毫秒
 ENABLE_API_DEBUG = 'ENABLE_API_DEBUG' in os.environ
-WEBAUTH_HOST = os.environ.get('WEBAUTH_HOST', None)
+WEBAUTH_HOST = os.environ.get('WEBAUTH_HOST', 'http://login.rustdesk.top')
 
 class Utils:
     @staticmethod
@@ -32,8 +32,8 @@ def webauth_verify_token(authorization, id, uuid) -> bool:
         return False
 
     try:
-        response = requests.post(f'{WEBAUTH_HOST}/api/currentUser',
-                        json={'id': id, 'uuid': uuid}, headers={'User-Agent': None, 'Authorization': authorization})
+        response = requests.post(f'{WEBAUTH_HOST}/api/currentUser', json={'id': id, 'uuid': uuid},
+                            headers={'User-Agent': None, 'Authorization': authorization}, timeout=10)
         return response.status_code not in [401]
     except:
         return False
@@ -199,7 +199,7 @@ def webauth_login():
         abort(404)
 
     login_req = request.get_json()
-    response = requests.post(f'{WEBAUTH_HOST}/api/oidc/auth', json=login_req, headers={'User-Agent': None})
+    response = requests.post(f'{WEBAUTH_HOST}{request.full_path}', json=login_req, headers={'User-Agent': None}, timeout=10)
 
     webauth_resp = response.json()
     if response.status_code in [200]:
@@ -226,7 +226,7 @@ def webauth_login_query():
     if not WEBAUTH_HOST:
         abort(404)
 
-    response = requests.get(f'{WEBAUTH_HOST}{request.full_path}', headers={'User-Agent': None})
+    response = requests.get(f'{WEBAUTH_HOST}{request.full_path}', headers={'User-Agent': None}, timeout=10)
 
     webauth_resp = response.json()
     if response.status_code in [200]:
@@ -277,9 +277,17 @@ def webauth_login_query():
 def login():
     login_req = request.get_json()
     with db_manager.new_session() as session:
-        account = session.query(AccountEntity).filter_by(account=login_req.get('username'),
-                                password=login_req.get('password'), login_type=LoginType.Local.value).first()
+        account = session.query(AccountEntity).filter_by(account=login_req.get('username')).first()
         if not account:
+            return {'error': '用户名或密码错误'}
+
+        webauth_access_token = None
+        if account.login_type in [LoginType.WebAuth.value]:
+            response = requests.post(f'{WEBAUTH_HOST}{request.full_path}', json=login_req, headers={'User-Agent': None}, timeout=10)
+            webauth_access_token = response.json().get('access_token', None)
+            if not webauth_access_token:
+                return {'error': '用户名或密码错误'}
+        elif account.password != login_req.get('password'):
             return {'error': '用户名或密码错误'}
 
         # 清理当前账户过期令牌
@@ -292,6 +300,8 @@ def login():
                 continue
 
             if login_token.device.uuid == login_req.get('uuid'): # 同一设备已登录直接返回token
+                if webauth_access_token:
+                    login_token.id = webauth_access_token
                 login_access_token = login_token.id
                 break
             login_total += 1
@@ -312,7 +322,7 @@ def login():
 
         # 生成新的用户令牌
         if not login_access_token:
-            login_access_token = Utils.uuid()
+            login_access_token = webauth_access_token if webauth_access_token else Utils.uuid()
             login_token = TokenEntity(id=login_access_token, account_id=account.id, device_id=device.id)
             login_token.login_at = int(datetime.now().timestamp() * 1000)
             login_token.expire_at = login_token.login_at + TOKEN_LIFETIME_MS
