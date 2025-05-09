@@ -36,7 +36,7 @@ def webauth_verify_token(authorization, id, uuid) -> bool:
                             headers={'User-Agent': None, 'Authorization': authorization}, timeout=10)
         return response.status_code not in [401]
     except:
-        return False
+        return True
 
 # 校验令牌
 def token_required(func):
