@@ -12,4 +12,4 @@ curl -H 'Content-Type: application/json' -X DELETE http://localhost/admin/api/ac
 
 # build docker
 docker build -t richiemay/alpine-rustdesk-api:latest .  
-docker tag richiemay/alpine-rustdesk-api:latest richiemay/alpine-rustdesk-api:1.3.8
+docker tag richiemay/alpine-rustdesk-api:latest richiemay/alpine-rustdesk-api:1.3.9
