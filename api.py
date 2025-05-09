@@ -1,11 +1,13 @@
 import os
 import re
 import uuid
+import requests
 import functools
 import dataclasses
 from datetime import datetime
-from flask import json, request, Blueprint, Flask
-from database_manager import db_manager, AccountEntity, DeviceEntity, TokenEntity, TagEntity, AddressBookEntity
+from urllib.parse import urlparse
+from flask import abort, json, request, Blueprint, Flask
+from database_manager import db_manager, LoginType, AccountEntity, DeviceEntity, TokenEntity, TagEntity, AddressBookEntity
 
 app = Flask(__name__)
 api = Blueprint('/api', __name__, url_prefix='/api')
@@ -14,6 +16,7 @@ admin_api = Blueprint('/admin/api', __name__, url_prefix='/admin/api')
 HTTP_DECODE_TOEKN = 'HTTP_DECODE_TOEKN'
 TOKEN_LIFETIME_MS = 48 * 3600 * 1000 # 令牌存活毫秒
 ENABLE_API_DEBUG = 'ENABLE_API_DEBUG' in os.environ
+WEBAUTH_HOST = os.environ.get('WEBAUTH_HOST', None)
 
 class Utils:
     @staticmethod
@@ -23,6 +26,17 @@ class Utils:
 
 def get_token_from_header():
     return request.headers.environ[HTTP_DECODE_TOEKN]
+
+def webauth_verify_token(authorization, id, uuid) -> bool:
+    if not WEBAUTH_HOST:
+        return False
+
+    try:
+        response = requests.post(f'{WEBAUTH_HOST}/api/currentUser',
+                        json={'id': id, 'uuid': uuid}, headers={'User-Agent': None, 'Authorization': authorization})
+        return response.status_code not in [401]
+    except:
+        return False
 
 # 校验令牌
 def token_required(func):
@@ -41,7 +55,9 @@ def token_required(func):
             if not login_token:
                 return {'error': '身份信息认证失败'}, 401
 
-            if login_token.expire_at <= int(datetime.now().timestamp() * 1000):
+            if (login_token.account.login_type in [LoginType.WebAuth.value] \
+                    and not webauth_verify_token(authorization, login_token.device.client, login_token.device.uuid)) \
+                    or (login_token.expire_at <= int(datetime.now().timestamp() * 1000)):
                 session.delete(login_token)
                 session.commit()
                 return {'error': '身份信息已过期,请重新登录'}, 401
@@ -167,12 +183,102 @@ def sysinfo():
         session.commit()
         return {'data': '上传系统信息成功'} 
 
+
+# 账户登录方式
+@api.route('/login-options', methods=['GET'])
+def login_options():
+    if not WEBAUTH_HOST:
+        abort(404)
+
+    return ["common-oidc/[{\"name\":\"webauth\"}]", "oidc/webauth"]
+
+# webauth登录请求
+@api.route('/oidc/auth', methods=['POST'])
+def webauth_login():
+    if not WEBAUTH_HOST:
+        abort(404)
+
+    login_req = request.get_json()
+    response = requests.post(f'{WEBAUTH_HOST}/api/oidc/auth', json=login_req, headers={'User-Agent': None})
+
+    webauth_resp = response.json()
+    if response.status_code in [200]:
+        webauth_url = urlparse(WEBAUTH_HOST)
+        webauth_resp['url'] = urlparse(webauth_resp.get('url'))._replace(scheme=webauth_url.scheme, netloc=webauth_url.netloc).geturl()
+
+        with db_manager.new_session() as session:
+            # 保存登录设备信息
+            device = session.query(DeviceEntity).filter_by(uuid=login_req.get('uuid')).first()
+            if not device:
+                device = DeviceEntity(id=Utils.uuid(), uuid=login_req.get('uuid'))
+                session.add(device)
+
+            device.client = login_req.get('id')
+            device.hostname = login_req.get('deviceInfo').get('name')
+            device.modified_at = int(datetime.now().timestamp() * 1000)
+            session.commit()
+
+    return webauth_resp
+
+# webauth登录查询
+@api.route('oidc/auth-query', methods=['GET'])
+def webauth_login_query():
+    if not WEBAUTH_HOST:
+        abort(404)
+
+    response = requests.get(f'{WEBAUTH_HOST}{request.full_path}', headers={'User-Agent': None})
+
+    webauth_resp = response.json()
+    if response.status_code in [200]:
+        username = webauth_resp.get('user', {}).get('name', None)
+        login_access_token = webauth_resp.get('access_token', None)
+        if username and login_access_token:
+            create_at = int(datetime.now().timestamp() * 1000)
+            with db_manager.new_session() as session:
+                account = session.query(AccountEntity).filter_by(account=username).first()
+                if not account:
+                    account = AccountEntity(id=Utils.uuid(), account=username, password='******', create_at=create_at)
+                    session.add(account)
+
+                # 添加或升级本地账户
+                account.login_type = LoginType.WebAuth.value
+
+                # 清理当前账户过期令牌
+                login_total = 0
+                allow_login_total = 10
+                for login_token in session.query(TokenEntity).filter_by(account_id=account.id).all():
+                    if login_token.expire_at <= int(datetime.now().timestamp() * 1000):
+                        session.delete(login_token)
+                        continue
+
+                    if login_token.device.uuid == request.args.get('uuid'): # 同一设备已登录则更新token
+                        login_token.id = login_access_token
+                        session.commit()
+                        return webauth_resp
+
+                    login_total += 1
+
+                if login_total >= allow_login_total:
+                    session.commit()
+                    return {'error': f'同一账户最多允许同时登录{allow_login_total}次'}
+
+                # 生成新的用户令牌
+                device = session.query(DeviceEntity).filter_by(uuid=request.args.get('uuid')).first()
+                login_token = TokenEntity(id=login_access_token, account_id=account.id, device_id=device.id)
+                login_token.login_at = create_at
+                login_token.expire_at = login_token.login_at + TOKEN_LIFETIME_MS
+                session.add(login_token)
+                session.commit()
+
+    return webauth_resp
+
 # 账户登录
 @api.route('/login', methods=['POST'])
 def login():
     login_req = request.get_json()
     with db_manager.new_session() as session:
-        account = session.query(AccountEntity).filter_by(account=login_req.get('username'), password=login_req.get('password')).first()
+        account = session.query(AccountEntity).filter_by(account=login_req.get('username'),
+                                password=login_req.get('password'), login_type=LoginType.Local.value).first()
         if not account:
             return {'error': '用户名或密码错误'}
 

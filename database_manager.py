@@ -1,9 +1,15 @@
+from enum import IntEnum
 from dataclasses import dataclass
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, sessionmaker, relationship
 from sqlalchemy import Column, Text, Integer, ForeignKey, UniqueConstraint, create_engine, event
 
 BaseEntity = declarative_base()
+
+
+class LoginType(IntEnum):
+    Local = 0
+    WebAuth = 1
 
 @dataclass
 class DeviceEntity(BaseEntity):
@@ -59,6 +65,9 @@ class AccountEntity(BaseEntity):
 
     # 启/停用
     status: int = Column(Integer, nullable=False, default=1)
+
+    # 登录类型
+    login_type: int = Column(Integer, nullable=False, default=LoginType.Local.value)
 
     # 创建时间
     create_at: int = Column(Integer, nullable=False)
