@@ -12,7 +12,7 @@ api = Blueprint('/api', __name__, url_prefix='/api')
 admin_api = Blueprint('/admin/api', __name__, url_prefix='/admin/api')
 
 HTTP_DECODE_TOEKN = 'HTTP_DECODE_TOEKN'
-TOKEN_LIFETIME_MS = 48 * 3600 * 1000 # 令牌存活毫秒
+TOKEN_LIFETIME_MS = 72 * 3600 * 1000 # 令牌存活毫秒
 ENABLE_API_DEBUG = 'ENABLE_API_DEBUG' in os.environ
 
 class Utils:
@@ -23,6 +23,17 @@ class Utils:
 
 def get_token_from_header():
     return request.headers.environ[HTTP_DECODE_TOEKN]
+
+# 延长令牌有效期
+def extend_token_lifetime(device: str):
+    if not device:
+        return
+
+    with db_manager.new_session() as session:
+        login_token = session.query(TokenEntity).filter_by(device_id=device).first()
+        if login_token:
+            login_token.expire_at = int(datetime.now().timestamp() * 1000) + TOKEN_LIFETIME_MS
+            session.commit()
 
 # 校验令牌
 def token_required(func):
@@ -137,13 +148,11 @@ def heartbeat():
     with db_manager.new_session() as session:
         device = session.query(DeviceEntity).filter_by(uuid=heartbeat_req.get('uuid')).first()
         if device:
+            extend_token_lifetime(device.id)
+
             device.modified_at = int(datetime.now().timestamp() * 1000)
-
-            login_token = session.query(TokenEntity).filter_by(device_id=device.id).first()
-            if login_token:
-                login_token.expire_at = device.modified_at + TOKEN_LIFETIME_MS #  自动保活设备登录的账号
-
             session.commit()
+
         return {'data': '请求成功'}
 
 # 更新设备系统信息
@@ -229,7 +238,13 @@ def logout():
 @api.route('/currentUser', methods=['GET', 'POST'])
 @token_required
 def current_user():
-    account = get_token_from_header().get('account')
+    login_token = get_token_from_header()
+    device = login_token.get('device', {})
+    hostname = device.get('hostname', '').lower()
+    if 'iphone' in hostname or 'ipad' in hostname:
+        extend_token_lifetime(device.get('id'))
+
+    account = login_token.get('account')
     return {'name': account.get('account'), 'status': account.get('status'), 'is_admin': False, 'info': {}}
 
 # 更新地址簿
