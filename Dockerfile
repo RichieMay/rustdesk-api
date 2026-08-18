@@ -1,12 +1,12 @@
 # AlpineLinux 3.15.0 with rustdesk-api
 FROM alpine:3.15.0
-MAINTAINER RichieMay mayboe@gmail.com
+LABEL maintainer="RichieMay mayboe@gmail.com"
 
 # Set useful environment variables
-ENV LANG                en_US.UTF-8
-ENV LC_ALL              en_US.UTF-8
-ENV LANGUAGE            en_US.UTF-8
-ENV ALPINE_OS_VERSION   3.15.0
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+ENV LANGUAGE=en_US.UTF-8
+ENV ALPINE_OS_VERSION=3.15.0
 
 # Change repositories in china
 RUN echo "http://mirrors.ustc.edu.cn/alpine/v3.15/main" > "/etc/apk/repositories" && \
